@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+
+import argparse
+import logging
+import socket
+import ssl
+
+from HTTPClient import HTTPClient, HTTPUtils
+
+DEFAULT_SERVER = "www.3700.network"
+DEFAULT_PORT = 443
+
+FB_ROOT = "/fakebook/"
+FB_LOGIN = "/accounts/login/?next=/fakebook/"
+
+#S_FLAG_FORMAT: <h3 class='secret_flag' style="color:red">FLAG: 64-characters-of-random-alphanumerics</h3>
+
+class Crawler:
+    frontier_queue = []
+    explored_set = set()
+    secret_flag_count = 0
+
+    def __init__(self, args):
+        self.client = HTTPClient(args.server, args.port)
+        self.username = args.username
+        self.password = args.password
+
+    def run(self):
+        # Log in
+        self.__log_in()
+
+        # Run the crawler until 5 secret flag are found
+        self.frontier_queue.append(FB_ROOT)  # Start at root of fakebook
+        while self.secret_flag_count < 5 and self.frontier_queue:
+            next_url = self.frontier_queue.pop(0)
+            (url_error, new_secret_flags, new_domain_urls) = self.__explore_url(next_url)
+
+            if url_error:
+                continue
+
+            if new_secret_flags:
+                print('\n'.join(new_secret_flags))
+                self.secret_flag_count += len(new_secret_flags)
+
+            self.frontier_queue.extend(new_domain_urls)
+
+        print("Crawl complete!")
+
+    def __explore_url(self, url):
+        response = self.client.get_url(url)
+
+
+        return False, [], []
+
+    def __log_in(self):
+        response = self.client.get_url(FB_LOGIN)
+
+        # Parse out the middleware token
+        csrfmiddlewaretoken = ""
+
+        post_response = HTTPUtils.construct_cgi_post_content(self.username, self.password, csrfmiddlewaretoken)
+        self.client.post_login(FB_LOGIN,post_response)
+        pass
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='crawl Fakebook')
+    parser.add_argument('-s', dest="server", type=str, default=DEFAULT_SERVER, help="The server to crawl")
+    parser.add_argument('-p', dest="port", type=int, default=DEFAULT_PORT, help="The port to use")
+    parser.add_argument('username', type=str, help="The username to use")
+    parser.add_argument('password', type=str, help="The password to use")
+    args = parser.parse_args()
+
+    log_level = logging.DEBUG
+    log_fmt = "[%(levelname)s] %(message)s"
+    logging.basicConfig(level=log_level, format=log_fmt)
+
+    sender = Crawler(args)
+    sender.run()
