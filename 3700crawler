@@ -2,16 +2,17 @@
 
 import argparse
 import logging
-import socket
-import ssl
 
 from HTTPClient import HTTPClient, HTTPUtils
+from HTTPResponse import HTTPResponse
 
 DEFAULT_SERVER = "www.3700.network"
 DEFAULT_PORT = 443
 
 FB_ROOT = "/fakebook/"
 FB_LOGIN = "/accounts/login/?next=/fakebook/"
+
+LOG_NAME = "crawler-log.txt"
 
 #S_FLAG_FORMAT: <h3 class='secret_flag' style="color:red">FLAG: 64-characters-of-random-alphanumerics</h3>
 
@@ -27,7 +28,8 @@ class Crawler:
 
     def run(self):
         # Log in
-        self.__log_in()
+        if self.__log_in() is None:
+            return
 
         # Run the crawler until 5 secret flag are found
         self.frontier_queue.append(FB_ROOT)  # Start at root of fakebook
@@ -44,23 +46,46 @@ class Crawler:
 
             self.frontier_queue.extend(new_domain_urls)
 
+        self.client.close_connection()
         print("Crawl complete!")
 
     def __explore_url(self, url):
-        response = self.client.get_url(url)
+        response = self.client.send_request("GET", url)
+        response_code = response.get_response_code()
 
-
-        return False, [], []
+        if response_code == 200:
+            pass  # Search flags and links
+        elif response_code == 302:
+            new_url = response.get_new_location()
+            if new_url is None:
+                logging.error("Redirect url wasn't provided.")
+                return True, [], []
+            self.__explore_url(new_url)
+        elif response_code == 403 or response_code == 404:
+            return True, [], []
+        elif response_code == 503:
+            self.__explore_url(url)
+        else:
+            logging.error("Unexpected response code encountered.")
+            return True, [], []
 
     def __log_in(self):
-        response = self.client.get_url(FB_LOGIN)
+        response = self.client.send_request("GET", FB_LOGIN)
+        response_code = response.get_response_code()
+
+        if response_code == 200:
+            pass  # Search middleware token
+        elif response_code == 503:
+            self.__log_in()
+        else:
+            logging.error("Unexpected response code encountered when logging in. Aborting.")
+            return None
 
         # Parse out the middleware token
         csrfmiddlewaretoken = ""
 
-        post_response = HTTPUtils.construct_cgi_post_content(self.username, self.password, csrfmiddlewaretoken)
-        self.client.post_login(FB_LOGIN,post_response)
-        pass
+        cgi_post_data = HTTPUtils.construct_cgi_post_content(self.username, self.password, csrfmiddlewaretoken)
+        self.client.send_request("POST", FB_LOGIN, cgi_post_data)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='crawl Fakebook')
@@ -70,9 +95,8 @@ if __name__ == "__main__":
     parser.add_argument('password', type=str, help="The password to use")
     args = parser.parse_args()
 
-    log_level = logging.DEBUG
-    log_fmt = "[%(levelname)s] %(message)s"
-    logging.basicConfig(level=log_level, format=log_fmt)
+    logging.basicConfig(filename=LOG_NAME, filemode='w', level=logging.INFO,
+                        format="[%(levelname)s] %(asctime)s - %(message)s", datefmt='%H:%M:%S')
 
     sender = Crawler(args)
     sender.run()
